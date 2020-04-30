@@ -47,7 +47,7 @@ func TestSampleDelivery(t *testing.T) {
 	// Let's create an even number of send batches so we don't run into the
 	// batch timeout case.
 	n := config.DefaultQueueConfig.MaxSamplesPerSend * 2
-	samples, series := createTimeseries(n)
+	samples, series := createTimeseries(n, n)
 
 	c := NewTestStorageClient()
 	c.expectSamples(samples[:len(samples)/2], series)
@@ -61,7 +61,7 @@ func TestSampleDelivery(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	metrics := newQueueManagerMetrics(nil)
-	m := NewQueueManager(nil, metrics, nil, dir, newEWMARate(ewmaWeight, shardUpdateDuration), cfg, nil, nil, c, defaultFlushDeadline)
+	m := NewQueueManager(metrics, nil, nil, nil, dir, newEWMARate(ewmaWeight, shardUpdateDuration), cfg, nil, nil, c, defaultFlushDeadline)
 	m.StoreSeries(series, 0)
 
 	// These should be received by the client.
@@ -70,15 +70,15 @@ func TestSampleDelivery(t *testing.T) {
 	defer m.Stop()
 
 	c.waitForExpectedSamples(t)
-	m.Append(samples[len(samples)/2:])
 	c.expectSamples(samples[len(samples)/2:], series)
+	m.Append(samples[len(samples)/2:])
 	c.waitForExpectedSamples(t)
 }
 
 func TestSampleDeliveryTimeout(t *testing.T) {
 	// Let's send one less sample than batch size, and wait the timeout duration
 	n := 9
-	samples, series := createTimeseries(n)
+	samples, series := createTimeseries(n, n)
 	c := NewTestStorageClient()
 
 	cfg := config.DefaultQueueConfig
@@ -90,7 +90,7 @@ func TestSampleDeliveryTimeout(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	metrics := newQueueManagerMetrics(nil)
-	m := NewQueueManager(nil, metrics, nil, dir, newEWMARate(ewmaWeight, shardUpdateDuration), cfg, nil, nil, c, defaultFlushDeadline)
+	m := NewQueueManager(metrics, nil, nil, nil, dir, newEWMARate(ewmaWeight, shardUpdateDuration), cfg, nil, nil, c, defaultFlushDeadline)
 	m.StoreSeries(series, 0)
 	m.Start()
 	defer m.Stop()
@@ -131,7 +131,7 @@ func TestSampleDeliveryOrder(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	metrics := newQueueManagerMetrics(nil)
-	m := NewQueueManager(nil, metrics, nil, dir, newEWMARate(ewmaWeight, shardUpdateDuration), config.DefaultQueueConfig, nil, nil, c, defaultFlushDeadline)
+	m := NewQueueManager(metrics, nil, nil, nil, dir, newEWMARate(ewmaWeight, shardUpdateDuration), config.DefaultQueueConfig, nil, nil, c, defaultFlushDeadline)
 	m.StoreSeries(series, 0)
 
 	m.Start()
@@ -150,8 +150,10 @@ func TestShutdown(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	metrics := newQueueManagerMetrics(nil)
-	m := NewQueueManager(nil, metrics, nil, dir, newEWMARate(ewmaWeight, shardUpdateDuration), config.DefaultQueueConfig, nil, nil, c, deadline)
-	samples, series := createTimeseries(2 * config.DefaultQueueConfig.MaxSamplesPerSend)
+
+	m := NewQueueManager(metrics, nil, nil, nil, dir, newEWMARate(ewmaWeight, shardUpdateDuration), config.DefaultQueueConfig, nil, nil, c, deadline)
+	n := 2 * config.DefaultQueueConfig.MaxSamplesPerSend
+	samples, series := createTimeseries(n, n)
 	m.StoreSeries(series, 0)
 	m.Start()
 
@@ -187,7 +189,7 @@ func TestSeriesReset(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	metrics := newQueueManagerMetrics(nil)
-	m := NewQueueManager(nil, metrics, nil, dir, newEWMARate(ewmaWeight, shardUpdateDuration), config.DefaultQueueConfig, nil, nil, c, deadline)
+	m := NewQueueManager(metrics, nil, nil, nil, dir, newEWMARate(ewmaWeight, shardUpdateDuration), config.DefaultQueueConfig, nil, nil, c, deadline)
 	for i := 0; i < numSegments; i++ {
 		series := []record.RefSeries{}
 		for j := 0; j < numSeries; j++ {
@@ -202,8 +204,9 @@ func TestSeriesReset(t *testing.T) {
 
 func TestReshard(t *testing.T) {
 	size := 10 // Make bigger to find more races.
-	n := config.DefaultQueueConfig.Capacity * size
-	samples, series := createTimeseries(n)
+	nSeries := 6
+	nSamples := config.DefaultQueueConfig.Capacity * size
+	samples, series := createTimeseries(nSamples, nSeries)
 
 	c := NewTestStorageClient()
 	c.expectSamples(samples, series)
@@ -216,7 +219,7 @@ func TestReshard(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	metrics := newQueueManagerMetrics(nil)
-	m := NewQueueManager(nil, metrics, nil, dir, newEWMARate(ewmaWeight, shardUpdateDuration), cfg, nil, nil, c, defaultFlushDeadline)
+	m := NewQueueManager(metrics, nil, nil, nil, dir, newEWMARate(ewmaWeight, shardUpdateDuration), cfg, nil, nil, c, defaultFlushDeadline)
 	m.StoreSeries(series, 0)
 
 	m.Start()
@@ -249,7 +252,7 @@ func TestReshardRaceWithStop(t *testing.T) {
 	go func() {
 		for {
 			metrics := newQueueManagerMetrics(nil)
-			m = NewQueueManager(nil, metrics, nil, "", newEWMARate(ewmaWeight, shardUpdateDuration), config.DefaultQueueConfig, nil, nil, c, defaultFlushDeadline)
+			m = NewQueueManager(metrics, nil, nil, nil, "", newEWMARate(ewmaWeight, shardUpdateDuration), config.DefaultQueueConfig, nil, nil, c, defaultFlushDeadline)
 			m.Start()
 			h.Unlock()
 			h.Lock()
@@ -267,7 +270,7 @@ func TestReshardRaceWithStop(t *testing.T) {
 func TestReleaseNoninternedString(t *testing.T) {
 	metrics := newQueueManagerMetrics(nil)
 	c := NewTestStorageClient()
-	m := NewQueueManager(nil, metrics, nil, "", newEWMARate(ewmaWeight, shardUpdateDuration), config.DefaultQueueConfig, nil, nil, c, defaultFlushDeadline)
+	m := NewQueueManager(metrics, nil, nil, nil, "", newEWMARate(ewmaWeight, shardUpdateDuration), config.DefaultQueueConfig, nil, nil, c, defaultFlushDeadline)
 	m.Start()
 
 	for i := 1; i < 1000; i++ {
@@ -289,62 +292,62 @@ func TestReleaseNoninternedString(t *testing.T) {
 	testutil.Assert(t, metric == 0, "expected there to be no calls to release for strings that were not already interned: %d", int(metric))
 }
 
-func TestCalculateDesiredsShards(t *testing.T) {
+func TestShouldReshard(t *testing.T) {
 	type testcase struct {
-		startingShards        int
-		samplesIn, samplesOut int64
-		reshard               bool
+		startingShards                           int
+		samplesIn, samplesOut, lastSendTimestamp int64
+		expectedToReshard                        bool
 	}
 	cases := []testcase{
 		{
-			// Test that ensures that if we haven't successfully sent a
-			// sample recently the queue will not reshard.
-			startingShards: 10,
-			reshard:        false,
-			samplesIn:      1000,
-			samplesOut:     10,
+			// Resharding shouldn't take place if the last successful send was > batch send deadline*2 seconds ago.
+			startingShards:    10,
+			samplesIn:         1000,
+			samplesOut:        10,
+			lastSendTimestamp: time.Now().Unix() - int64(3*time.Duration(config.DefaultQueueConfig.BatchSendDeadline)/time.Second),
+			expectedToReshard: false,
 		},
 		{
-			startingShards: 5,
-			reshard:        true,
-			samplesIn:      1000,
-			samplesOut:     10,
+			startingShards:    5,
+			samplesIn:         1000,
+			samplesOut:        10,
+			lastSendTimestamp: time.Now().Unix(),
+			expectedToReshard: true,
 		},
 	}
 	for _, c := range cases {
 		metrics := newQueueManagerMetrics(nil)
 		client := NewTestStorageClient()
-		m := NewQueueManager(nil, metrics, nil, "", newEWMARate(ewmaWeight, shardUpdateDuration), config.DefaultQueueConfig, nil, nil, client, defaultFlushDeadline)
+		m := NewQueueManager(metrics, nil, nil, nil, "", newEWMARate(ewmaWeight, shardUpdateDuration), config.DefaultQueueConfig, nil, nil, client, defaultFlushDeadline)
 		m.numShards = c.startingShards
 		m.samplesIn.incr(c.samplesIn)
 		m.samplesOut.incr(c.samplesOut)
-		m.lastSendTimestamp = time.Now().Unix()
+		m.lastSendTimestamp = c.lastSendTimestamp
 
-		// Resharding shouldn't take place if the last successful send was > batch send deadline*2 seconds ago.
-		if !c.reshard {
-			m.lastSendTimestamp = m.lastSendTimestamp - int64(3*time.Duration(config.DefaultQueueConfig.BatchSendDeadline)/time.Second)
-		}
 		m.Start()
+
 		desiredShards := m.calculateDesiredShards()
+		shouldReshard := m.shouldReshard(desiredShards)
+
 		m.Stop()
-		if !c.reshard {
-			testutil.Assert(t, desiredShards == m.numShards, "expected calculateDesiredShards to not want to reshard, wants to change from %d to %d shards", m.numShards, desiredShards)
-		} else {
-			testutil.Assert(t, desiredShards != m.numShards, "expected calculateDesiredShards to want to reshard, wants to change from %d to %d shards", m.numShards, desiredShards)
-		}
+
+		testutil.Equals(t, c.expectedToReshard, shouldReshard)
 	}
 }
 
-func createTimeseries(n int) ([]record.RefSample, []record.RefSeries) {
-	samples := make([]record.RefSample, 0, n)
-	series := make([]record.RefSeries, 0, n)
-	for i := 0; i < n; i++ {
+func createTimeseries(numSamples, numSeries int) ([]record.RefSample, []record.RefSeries) {
+	samples := make([]record.RefSample, 0, numSamples)
+	series := make([]record.RefSeries, 0, numSeries)
+	for i := 0; i < numSeries; i++ {
 		name := fmt.Sprintf("test_metric_%d", i)
-		samples = append(samples, record.RefSample{
-			Ref: uint64(i),
-			T:   int64(i),
-			V:   float64(i),
-		})
+		for j := 0; j < numSamples; j++ {
+			samples = append(samples, record.RefSample{
+				Ref: uint64(i),
+				T:   int64(j),
+				V:   float64(i),
+			})
+
+		}
 		series = append(series, record.RefSeries{
 			Ref:    uint64(i),
 			Labels: labels.Labels{{Name: "__name__", Value: name}},
@@ -365,6 +368,7 @@ func getSeriesNameFromRef(r record.RefSeries) string {
 type TestStorageClient struct {
 	receivedSamples map[string][]prompb.Sample
 	expectedSamples map[string][]prompb.Sample
+	withWaitGroup   bool
 	wg              sync.WaitGroup
 	mtx             sync.Mutex
 	buf             []byte
@@ -372,12 +376,16 @@ type TestStorageClient struct {
 
 func NewTestStorageClient() *TestStorageClient {
 	return &TestStorageClient{
+		withWaitGroup:   true,
 		receivedSamples: map[string][]prompb.Sample{},
 		expectedSamples: map[string][]prompb.Sample{},
 	}
 }
 
 func (c *TestStorageClient) expectSamples(ss []record.RefSample, series []record.RefSeries) {
+	if !c.withWaitGroup {
+		return
+	}
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 
@@ -395,6 +403,9 @@ func (c *TestStorageClient) expectSamples(ss []record.RefSample, series []record
 }
 
 func (c *TestStorageClient) waitForExpectedSamples(tb testing.TB) {
+	if !c.withWaitGroup {
+		return
+	}
 	c.wg.Wait()
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
@@ -405,13 +416,19 @@ func (c *TestStorageClient) waitForExpectedSamples(tb testing.TB) {
 	}
 }
 
-func (c *TestStorageClient) expectSampleCount(ss []record.RefSample) {
+func (c *TestStorageClient) expectSampleCount(numSamples int) {
+	if !c.withWaitGroup {
+		return
+	}
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
-	c.wg.Add(len(ss))
+	c.wg.Add(numSamples)
 }
 
 func (c *TestStorageClient) waitForExpectedSampleCount() {
+	if !c.withWaitGroup {
+		return
+	}
 	c.wg.Wait()
 }
 
@@ -447,7 +464,9 @@ func (c *TestStorageClient) Store(_ context.Context, req []byte) error {
 			c.receivedSamples[seriesName] = append(c.receivedSamples[seriesName], sample)
 		}
 	}
-	c.wg.Add(-count)
+	if c.withWaitGroup {
+		c.wg.Add(-count)
+	}
 	return nil
 }
 
@@ -493,7 +512,7 @@ func BenchmarkSampleDelivery(b *testing.B) {
 	// Let's create an even number of send batches so we don't run into the
 	// batch timeout case.
 	n := config.DefaultQueueConfig.MaxSamplesPerSend * 10
-	samples, series := createTimeseries(n)
+	samples, series := createTimeseries(n, n)
 
 	c := NewTestStorageClient()
 
@@ -506,7 +525,7 @@ func BenchmarkSampleDelivery(b *testing.B) {
 	defer os.RemoveAll(dir)
 
 	metrics := newQueueManagerMetrics(nil)
-	m := NewQueueManager(nil, metrics, nil, dir, newEWMARate(ewmaWeight, shardUpdateDuration), cfg, nil, nil, c, defaultFlushDeadline)
+	m := NewQueueManager(metrics, nil, nil, nil, dir, newEWMARate(ewmaWeight, shardUpdateDuration), cfg, nil, nil, c, defaultFlushDeadline)
 	m.StoreSeries(series, 0)
 
 	// These should be received by the client.
@@ -515,7 +534,7 @@ func BenchmarkSampleDelivery(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		c.expectSampleCount(samples)
+		c.expectSampleCount(len(samples))
 		m.Append(samples)
 		c.waitForExpectedSampleCount()
 	}
@@ -548,7 +567,7 @@ func BenchmarkStartup(b *testing.B) {
 	for n := 0; n < b.N; n++ {
 		metrics := newQueueManagerMetrics(nil)
 		c := NewTestBlockedStorageClient()
-		m := NewQueueManager(nil, metrics, logger, dir,
+		m := NewQueueManager(metrics, nil, nil, logger, dir,
 			newEWMARate(ewmaWeight, shardUpdateDuration),
 			config.DefaultQueueConfig, nil, nil, c, 1*time.Minute)
 		m.watcher.SetStartTime(timestamp.Time(math.MaxInt64))
@@ -599,7 +618,7 @@ func TestCalculateDesiredShards(t *testing.T) {
 
 	metrics := newQueueManagerMetrics(nil)
 	samplesIn := newEWMARate(ewmaWeight, shardUpdateDuration)
-	m := NewQueueManager(nil, metrics, nil, dir, samplesIn, cfg, nil, nil, c, defaultFlushDeadline)
+	m := NewQueueManager(metrics, nil, nil, nil, dir, samplesIn, cfg, nil, nil, c, defaultFlushDeadline)
 
 	// Need to start the queue manager so the proper metrics are initialized.
 	// However we can stop it right away since we don't need to do any actual
