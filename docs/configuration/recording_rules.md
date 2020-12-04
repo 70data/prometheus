@@ -45,8 +45,10 @@ dashboards, which need to query the same expression repeatedly every time they
 refresh.
 
 Recording and alerting rules exist in a rule group. Rules within a group are
-run sequentially at a regular interval. The names of recording and alerting rules
+run sequentially at a regular interval. The names of recording rules
 must be [valid metric names](https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels).
+The names of alerting rules must be
+[valid label values](https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels).
 
 The syntax of a rule file is:
 
@@ -98,7 +100,7 @@ labels:
 The syntax for alerting rules is:
 
 ```
-# The name of the alert. Must be a valid metric name.
+# The name of the alert. Must be a valid label value.
 alert: <string>
 
 # The PromQL expression to evaluate. Every evaluation cycle this is
