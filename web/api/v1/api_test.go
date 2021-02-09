@@ -730,6 +730,13 @@ func testEndpoints(t *testing.T, api *API, tr *testTargetRetriever, testLabelAPI
 		{
 			endpoint: api.series,
 			query: url.Values{
+				"match[]": []string{`{foo=""}`},
+			},
+			errType: errorBadData,
+		},
+		{
+			endpoint: api.series,
+			query: url.Values{
 				"match[]": []string{`test_metric1{foo=~".+o"}`},
 			},
 			response: []labels.Labels{
@@ -1615,7 +1622,84 @@ func testEndpoints(t *testing.T, api *API, tr *testTargetRetriever, testLabelAPI
 					"boo",
 				},
 			},
-
+			// Label values with bad matchers.
+			{
+				endpoint: api.labelValues,
+				params: map[string]string{
+					"name": "foo",
+				},
+				query: url.Values{
+					"match[]": []string{`{foo=""`, `test_metric2`},
+				},
+				errType: errorBadData,
+			},
+			// Label values with empty matchers.
+			{
+				endpoint: api.labelValues,
+				params: map[string]string{
+					"name": "foo",
+				},
+				query: url.Values{
+					"match[]": []string{`{foo=""}`},
+				},
+				errType: errorBadData,
+			},
+			// Label values with matcher.
+			{
+				endpoint: api.labelValues,
+				params: map[string]string{
+					"name": "foo",
+				},
+				query: url.Values{
+					"match[]": []string{`test_metric2`},
+				},
+				response: []string{
+					"boo",
+				},
+			},
+			// Label values with matcher.
+			{
+				endpoint: api.labelValues,
+				params: map[string]string{
+					"name": "foo",
+				},
+				query: url.Values{
+					"match[]": []string{`test_metric1`},
+				},
+				response: []string{
+					"bar",
+					"boo",
+				},
+			},
+			// Label values with matcher using label filter.
+			{
+				endpoint: api.labelValues,
+				params: map[string]string{
+					"name": "foo",
+				},
+				query: url.Values{
+					"match[]": []string{`test_metric1{foo="bar"}`},
+				},
+				response: []string{
+					"bar",
+				},
+			},
+			// Label values with matcher and time range.
+			{
+				endpoint: api.labelValues,
+				params: map[string]string{
+					"name": "foo",
+				},
+				query: url.Values{
+					"match[]": []string{`test_metric1`},
+					"start":   []string{"1"},
+					"end":     []string{"100000000"},
+				},
+				response: []string{
+					"bar",
+					"boo",
+				},
+			},
 			// Label names.
 			{
 				endpoint: api.labelNames,
@@ -1700,6 +1784,60 @@ func testEndpoints(t *testing.T, api *API, tr *testTargetRetriever, testLabelAPI
 					"end": []string{"20"},
 				},
 				response: []string{"__name__", "dup", "foo"},
+			},
+			// Label names with bad matchers.
+			{
+				endpoint: api.labelNames,
+				query: url.Values{
+					"match[]": []string{`{foo=""`, `test_metric2`},
+				},
+				errType: errorBadData,
+			},
+			// Label values with empty matchers.
+			{
+				endpoint: api.labelNames,
+				params: map[string]string{
+					"name": "foo",
+				},
+				query: url.Values{
+					"match[]": []string{`{foo=""}`},
+				},
+				errType: errorBadData,
+			},
+			// Label names with matcher.
+			{
+				endpoint: api.labelNames,
+				query: url.Values{
+					"match[]": []string{`test_metric2`},
+				},
+				response: []string{"__name__", "foo"},
+			},
+			// Label names with matcher.
+			{
+				endpoint: api.labelNames,
+				query: url.Values{
+					"match[]": []string{`test_metric3`},
+				},
+				response: []string{"__name__", "dup", "foo"},
+			},
+			// Label names with matcher using label filter.
+			// There is no matching series.
+			{
+				endpoint: api.labelNames,
+				query: url.Values{
+					"match[]": []string{`test_metric1{foo="test"}`},
+				},
+				response: []string{},
+			},
+			// Label names with matcher and time range.
+			{
+				endpoint: api.labelNames,
+				query: url.Values{
+					"match[]": []string{`test_metric2`},
+					"start":   []string{"1"},
+					"end":     []string{"100000000"},
+				},
+				response: []string{"__name__", "foo"},
 			},
 		}...)
 	}
@@ -2786,5 +2924,113 @@ func BenchmarkRespond(b *testing.B) {
 	api := API{}
 	for n := 0; n < b.N; n++ {
 		api.respond(&testResponseWriter, response, nil)
+	}
+}
+
+func TestGetGlobalURL(t *testing.T) {
+	mustParseURL := func(t *testing.T, u string) *url.URL {
+		parsed, err := url.Parse(u)
+		require.NoError(t, err)
+		return parsed
+	}
+
+	testcases := []struct {
+		input    *url.URL
+		opts     GlobalURLOptions
+		expected *url.URL
+		errorful bool
+	}{
+		{
+			mustParseURL(t, "http://127.0.0.1:9090"),
+			GlobalURLOptions{
+				ListenAddress: "127.0.0.1:9090",
+				Host:          "127.0.0.1:9090",
+				Scheme:        "http",
+			},
+			mustParseURL(t, "http://127.0.0.1:9090"),
+			false,
+		},
+		{
+			mustParseURL(t, "http://127.0.0.1:9090"),
+			GlobalURLOptions{
+				ListenAddress: "127.0.0.1:9090",
+				Host:          "prometheus.io",
+				Scheme:        "https",
+			},
+			mustParseURL(t, "https://prometheus.io"),
+			false,
+		},
+		{
+			mustParseURL(t, "http://exemple.com"),
+			GlobalURLOptions{
+				ListenAddress: "127.0.0.1:9090",
+				Host:          "prometheus.io",
+				Scheme:        "https",
+			},
+			mustParseURL(t, "http://exemple.com"),
+			false,
+		},
+		{
+			mustParseURL(t, "http://localhost:8080"),
+			GlobalURLOptions{
+				ListenAddress: "127.0.0.1:9090",
+				Host:          "prometheus.io",
+				Scheme:        "https",
+			},
+			mustParseURL(t, "http://prometheus.io:8080"),
+			false,
+		},
+		{
+			mustParseURL(t, "http://[::1]:8080"),
+			GlobalURLOptions{
+				ListenAddress: "127.0.0.1:9090",
+				Host:          "prometheus.io",
+				Scheme:        "https",
+			},
+			mustParseURL(t, "http://prometheus.io:8080"),
+			false,
+		},
+		{
+			mustParseURL(t, "http://localhost"),
+			GlobalURLOptions{
+				ListenAddress: "127.0.0.1:9090",
+				Host:          "prometheus.io",
+				Scheme:        "https",
+			},
+			mustParseURL(t, "http://prometheus.io"),
+			false,
+		},
+		{
+			mustParseURL(t, "http://localhost:9091"),
+			GlobalURLOptions{
+				ListenAddress: "[::1]:9090",
+				Host:          "[::1]",
+				Scheme:        "https",
+			},
+			mustParseURL(t, "http://[::1]:9091"),
+			false,
+		},
+		{
+			mustParseURL(t, "http://localhost:9091"),
+			GlobalURLOptions{
+				ListenAddress: "[::1]:9090",
+				Host:          "[::1]:9090",
+				Scheme:        "https",
+			},
+			mustParseURL(t, "http://[::1]:9091"),
+			false,
+		},
+	}
+
+	for i, tc := range testcases {
+		t.Run(fmt.Sprintf("Test %d", i), func(t *testing.T) {
+			output, err := getGlobalURL(tc.input, tc.opts)
+			if tc.errorful {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.expected, output)
+		})
 	}
 }
